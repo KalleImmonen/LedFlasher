@@ -1,0 +1,7 @@
+{
+    "baudrate": 4, 
+    "full_compilation": true, 
+    "serial_port": 0, 
+    "show_compilation_output": true, 
+    "show_upload_output": true
+}

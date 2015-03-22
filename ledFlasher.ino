@@ -1,10 +1,9 @@
-// ledFlasher.ino
-
 void setup()
 {
     readDefaultsFromEeprom();
     initOutputs()
 }
+
 void initOutputs()
 {
     pinMode(LED_PIN, OUTPUT);
@@ -17,7 +16,7 @@ void loop()
     if (shouldTriggerLedFlash())
     {
         triggerCamera()
-        triggerFlasing();
+        triggerFlashing();
     }
 }
 
@@ -34,13 +33,15 @@ boolean shouldTriggerLedFlash()
     }
     return false;
 }
+
 void triggerCamera()
 {
     digitalWrite(CAMERA_PIN, HIGH);
     waitFor(30)
     digitalWrite(CAMERA_PIN, LOW);
 }
-void triggerFlasing()
+
+void triggerFlashing()
 {
     byte size = flashSequence.length;
     for (byte i = 0; i < size; i++ )
@@ -68,6 +69,7 @@ void readDefaultsFromEeprom()
 {
     read_from_eeprom();
 }
+
 void writeDefaultsToEeprom()
 {
     //TODO Flash following:
