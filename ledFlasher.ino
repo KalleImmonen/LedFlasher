@@ -21,6 +21,7 @@ bit isThresholdMode;
 bit isTriggerAboveLimit;
 byte port;
 unsigned int triggerLevel;
+unsigned int startValue;
 
 void setup()
 {
@@ -33,7 +34,9 @@ void setup()
 }
 
 void initInputs() {
-
+    if (isAnalog && isThresholdMode) {
+        startValue = readAnalog(port);
+    }
 }
 
 void initOutputs()
