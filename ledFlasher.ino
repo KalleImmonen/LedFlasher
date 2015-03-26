@@ -1,14 +1,39 @@
 #include <EEPROM.h>
 //const byte EEPROM_START = 0;
+const int SERIAL_BAUDRATE = 9600;
 const byte MAX_LED_ON = 10; //10ms hopefully
 const byte HOLD_CAMERA_PIN_UP = 30;
 const byte FLASH_SEQUNCE_SIZE = 8; //4 delays, 4 ons,
+const byte EEPROM_SETTINGS_OFFSET = 10;
+const byte EEPROM_TRIGGER_LEVEL_HIGH = EEPROM_SETTINGS_OFFSET + 1;
+const byte EEPROM_TRIGGER_LEVEL_LOW = EEPROM_SETTINGS_OFFSET + 2;
 
-byte {FLASH_SEQUNCE_SIZE} flashSequence;
+const unsigned int TRIGGER_LEVEL = 1024;
+
+//Pins
+const byte LED_PIN = 10;
+
+byte[FLASH_SEQUNCE_SIZE] flashSequence;
+
+//Settings
+bit isAnalog;
+bit isThresholdMode;
+bit isTriggerAboveLimit;
+byte port;
+unsigned int triggerLevel;
+
 void setup()
 {
     readDefaultsFromEeprom();
+    updateTriggering();
     initOutputs();
+    initInputs();
+    initSerial();
+
+}
+
+void initInputs() {
+
 }
 
 void initOutputs()
@@ -33,12 +58,30 @@ boolean shouldTriggerLedFlash()
     {
         return false;
     }
-    if (read_analog() > TRIGGER_LEVEL)
+    if (readTrigger())
     {
         isFiredOnce = true;
         return true;
     }
     return false;
+}
+boolean readTrigger() {
+    if (isAnalog) {
+        int readOut = readAnalog(port);
+        if (isThresholdMode) {
+            // start value vs current value has diff
+            return (startValue - readOut) > triggerLevel;
+        } else {
+            //current value bigger/smaller than trigger level
+            if (isTriggerAboveLimit) {
+                return readOut < triggerLevel;
+            } else {
+                return readOut > triggerLevel;
+            }
+        }
+    } else {
+        return readDigital(port) == HIGH;
+    }
 }
 
 void triggerCamera()
@@ -84,7 +127,7 @@ void readDefaultsFromEeprom()
     }
 }
 
-void updateFlashSequence(byte {} newFlashSequnce)
+void updateFlashSequence(byte[] newFlashSequnce)
 {
     for (byte i = 0; i < FLASH_SEQUNCE_SIZE; i++)
     {
@@ -95,38 +138,117 @@ void updateFlashSequence(byte {} newFlashSequnce)
     }
     flashSequence = newFlashSequnce;
 }
+
+void updateTriggering()
+{
+    updateTriggerSettingsFromEeprom();
+    updateTriggerLevelFromEeprom();
+}
+void updateTriggerSettingsFromEeprom() {
+    byte settings = EEPROM.read(EEPROM_SETTINGS_OFFSET);
+    isAnalog = bitRead(settings, 0);
+    isThresholdMode = bitRead(settings, 1);
+    isTriggerAboveLimit = bitRead(settings, 2);
+    port = settings >> 4;
+}
+void updateTriggerLevelFromEeprom() {
+    byte high = EEPROM.read(EEPROM_TRIGGER_LEVEL_HIGH);
+    byte low = EEPROM.read(EEPROM_TRIGGER_LEVEL_LOW);
+    unsigned int combined = bitShiftCombine(high, low);
+    if ( combined > MAX_TRIGGER_LEVEL) {
+        combined = MAX_TRIGGER_LEVEL;
+    }
+    triggerLevel = combined;
+}
 void updateSensorConfig()
 {
     //TODO Sensor port & trigger level
 }
 
+void initSerial()
+{
+    Serial.begin(SERIAL_BAUDRATE);
+}
 void readSerial()
 {
-
-    //Pulses definion: set of onOff
-    /**
-    1. byte: MODE SELECTION: Flash configure(0xFA),Sensor configure(0xFB)
-
-    **Flash configures
-    2. byte: delay after signal < 1000ms
-    3. byte: light on time < 10ms
-    4. byte: delay delay after next < 1000ms
-    5. byte: light on time < 10ms
-    IF 0x00 sent - means end of message
-
-    **Sensor configure
-    2.byte:
-        -1bit Analog/digital mode
-        -1bit Threshold/limit mode
-        -1bit Below/above limit trigger
-        -1bit Reserved
-        -4bit PORT number - use all bits!
-
-    3-4. bytes 1024 Trigger level (only needs 11bits)
-
-
-    **/
-
-    //SAVE SETTINGS TO EEPROM
+    while (Serial.available() > 0)
+    {
+        byte modeSelection = Serial.read();
+        switch (modeSelection)
+        {
+        case 0xFA:
+            readFlashSequenceFromSerial();
+            break;
+        case 0xFB:
+            readSensorConfigureFromSerial();
+            break;
+        default:
+            return;
+        }
+    }
 }
 
+//Pulses definion: set of onOff
+
+//1. byte: MODE SELECTION: Flash configure(0xFA), Sensor configure(0xFB)
+
+//   Flash configures
+// 2. byte: delay after signal < 1000ms
+// 3. byte: light on time < 10ms
+// 4. byte: delay delay after next < 1000ms
+// 5. byte: light on time < 10ms
+// IF 0x00 sent - means end of message
+
+//    Sensor configure
+// 2.byte:
+//     -1bit Analog/digital mode
+//     -1bit Threshold/limit mode
+//     -1bit Below/above limit trigger
+//     -1bit Reserved
+//     -4bit PORT number - use all bits!
+
+// 3-4. bytes 1024 Trigger level (only needs 11bits)
+
+
+
+//SAVE SETTINGS TO EEPROM
+void readFlashSequenceFromSerial()
+{
+    byte[FLASH_SEQUNCE_SIZE] buffer;
+    byte readBytes = Serial.readBytesUntil(0x00, buffer, FLASH_SEQUNCE_SIZE );
+
+    if (readBytes > 2)
+    {
+        updateFlashSequence(readBytes);
+    }
+}
+void readSensorConfigureFromSerial()
+{
+    byte[3] buffer;
+    Serial.readBytes(buffer, 3);
+    if ( !validateBuffer(buffer)) {
+        return;
+    }
+    saveToEEPROM();
+}
+
+boolean validateBuffer(byte[] buffer) {
+    return bitRead(buffer[0], 1) == 0
+           && bitRead(buffer[1], 7) == 0
+           && bitRead(buffer[1], 6) == 0
+           && bitRead(buffer[1], 5) == 0
+}
+void runSimulatedLedShow()
+{
+    //TODO:
+}
+
+
+unsigned int bitShiftCombine( byte high, byte low)
+{
+    unsigned int combined;
+    combined = high;
+    combined = combined << 8;
+    combined |= low;
+    return combined;
+}
