@@ -7,6 +7,8 @@ const byte FLASH_SEQUNCE_SIZE = 8; //4 delays, 4 ons,
 const byte EEPROM_SETTINGS_OFFSET = 10;
 const byte EEPROM_TRIGGER_LEVEL_HIGH = EEPROM_SETTINGS_OFFSET + 1;
 const byte EEPROM_TRIGGER_LEVEL_LOW = EEPROM_SETTINGS_OFFSET + 2;
+const byte SIMULATION_LED = 13;
+const int SIMULATION_MULTIPLIER = 200;
 
 const unsigned int TRIGGER_LEVEL = 1024;
 
@@ -68,6 +70,7 @@ boolean shouldTriggerLedFlash()
     }
     return false;
 }
+
 boolean readTrigger() {
     if (isAnalog) {
         int readOut = readAnalog(port);
@@ -123,7 +126,6 @@ void turnLedOn(int time)
 
 void readDefaultsFromEeprom()
 {
-    byte i;
     for (byte i = 0; i < FLASH_SEQUNCE_SIZE; i++)
     {
         flashSequence {i} = EEPROM.read(i);
@@ -235,6 +237,7 @@ void readSensorConfigureFromSerial()
     saveToEEPROM();
 }
 
+//Unused bits should be zero
 boolean validateBuffer(byte[] buffer) {
     return bitRead(buffer[0], 1) == 0
            && bitRead(buffer[1], 7) == 0
@@ -243,14 +246,44 @@ boolean validateBuffer(byte[] buffer) {
 }
 void runSimulatedLedShow()
 {
-    //TODO:
+    blinkSimulation();
+    simulateLedSequence();
+    blinkSimulation();
+}
+void simulateLedSequence() {
+    byte duration;
+    for (byte i = 0; i < FLASH_SEQUNCE_SIZE; i++) {
+        duration = flashSequence[i];
+        if (i % 2) {
+            turnSimulationLedOn(duration);
+        } else {
+            waitSimulationFor(duration);
+        }
+    }
+}
+void turnSimulationLedOn(int duration) {
+    digitalWrite(SIMULATION_LED, HIGH);
+    delay(duration * SIMULATION_MULTIPLIER);
+    digitalWrite(SIMULATION_LED, LOW);
+}
+
+void waitSimulationFor(int duration) {
+    delay(duration * SIMULATION_MULTIPLIER);
+}
+
+void blinkSimulation() {
+    for (byte i = 0; i < 10; i++) {
+        digitalWrite(SIMULATION_LED, HIGH);
+        delay(SIMULATION_MULTIPLIER);
+        digitalWrite(SIMULATION_LED, LOW);
+        delay(SIMULATION_MULTIPLIER);
+    }
 }
 
 
 unsigned int bitShiftCombine( byte high, byte low)
 {
-    unsigned int combined;
-    combined = high;
+    unsigned int combined = high;
     combined = combined << 8;
     combined |= low;
     return combined;
