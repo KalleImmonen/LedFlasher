@@ -52,9 +52,13 @@ void loop()
 
     if (shouldTriggerLedFlash())
     {
-        triggerCamera()
-        triggerFlashing();
+        triggerImageTaking();
     }
+}
+
+void triggerImageTaking() {
+    triggerCamera();
+    triggerFlashing();
 }
 
 boolean shouldTriggerLedFlash()
@@ -187,6 +191,13 @@ void readSerial()
         case 0xFB:
             readSensorConfigureFromSerial();
             break;
+        case 0xFC:
+            runSimulatedLedShow();
+            break;
+        case 0xFD:
+            triggerImageTaking();
+            break;
+
         default:
             return;
         }
@@ -250,6 +261,7 @@ void runSimulatedLedShow()
     simulateLedSequence();
     blinkSimulation();
 }
+
 void simulateLedSequence() {
     byte duration;
     for (byte i = 0; i < FLASH_SEQUNCE_SIZE; i++) {
@@ -261,6 +273,7 @@ void simulateLedSequence() {
         }
     }
 }
+
 void turnSimulationLedOn(int duration) {
     digitalWrite(SIMULATION_LED, HIGH);
     delay(duration * SIMULATION_MULTIPLIER);
