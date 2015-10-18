@@ -1,32 +1,36 @@
 #include <EEPROM.h>
+
 //const byte EEPROM_START = 0;
 const int SERIAL_BAUDRATE = 9600;
 const byte MAX_LED_ON = 10; //10ms hopefully
 const byte HOLD_CAMERA_PIN_UP = 30;
-const byte FLASH_SEQUNCE_SIZE = 8; //4 delays, 4 ons,
+const byte FLASH_SEQUNCE_SIZE = 8; //4 delays, 4 on's,
+const byte CONFIG_SIZE = 3; //4 delays, 4 on's,
 const byte EEPROM_SETTINGS_OFFSET = 10;
 const byte EEPROM_TRIGGER_LEVEL_HIGH = EEPROM_SETTINGS_OFFSET + 1;
 const byte EEPROM_TRIGGER_LEVEL_LOW = EEPROM_SETTINGS_OFFSET + 2;
 const byte SIMULATION_LED = 13;
-const int SIMULATION_MULTIPLIER = 200;
-
-const unsigned int TRIGGER_LEVEL = 1024;
+const byte CONFIG_START_INDEX = 50;
+const int SIMULATION_MULTIPLIER = 2;
+const unsigned int MAX_TRIGGER_LEVEL = 1023;
 
 //Pins
-const byte LED_PIN = 10;
+const int CAMERA_PIN = 4; //TODO: Config this.
+const int LED_PIN = 10;
 
-byte[FLASH_SEQUNCE_SIZE] flashSequence;
+byte flashSequence[FLASH_SEQUNCE_SIZE];
+byte configSequence[CONFIG_SIZE];
 
 //Settings
-bit isAnalog;
-bit isThresholdMode;
-bit isTriggerAboveLimit;
+boolean isAnalog;
+boolean isThresholdMode;
+boolean isTriggerAboveLimit;
+boolean isFiredOnce = false;
 byte port;
 unsigned int triggerLevel;
 unsigned int startValue;
 
-void setup()
-{
+void setup() {
     readDefaultsFromEeprom();
     updateTriggering();
     initOutputs();
@@ -35,23 +39,28 @@ void setup()
 
 }
 
+int readAnalog(byte port) {
+    return analogRead(port);
+}
+
+boolean readDigital(byte port) {
+    return digitalRead(port) == HIGH;
+}
+
 void initInputs() {
     if (isAnalog && isThresholdMode) {
         startValue = readAnalog(port);
     }
 }
 
-void initOutputs()
-{
+void initOutputs() {
     pinMode(LED_PIN, OUTPUT);
 }
 
-void loop()
-{
+void loop() {
     readSerial();
 
-    if (shouldTriggerLedFlash())
-    {
+    if (shouldTriggerLedFlash()) {
         triggerImageTaking();
     }
 }
@@ -61,14 +70,11 @@ void triggerImageTaking() {
     triggerFlashing();
 }
 
-boolean shouldTriggerLedFlash()
-{
-    if (isFiredOnce)
-    {
+boolean shouldTriggerLedFlash() {
+    if (isFiredOnce) {
         return false;
     }
-    if (readTrigger())
-    {
+    if (readTrigger()) {
         isFiredOnce = true;
         return true;
     }
@@ -90,37 +96,34 @@ boolean readTrigger() {
             }
         }
     } else {
-        return readDigital(port) == HIGH;
+        return readDigital(port);
     }
 }
 
-void triggerCamera()
-{
+void waitFor(int time) {
+    delay(time);
+}
+
+void triggerCamera() {
     digitalWrite(CAMERA_PIN, HIGH);
     waitFor(HOLD_CAMERA_PIN_UP);
     digitalWrite(CAMERA_PIN, LOW);
 }
 
-void triggerFlashing()
-{
-    for (byte i = 0; i < FLASH_SEQUNCE_SIZE; i++ )
-    {
+void triggerFlashing() {
+    for (byte i = 0; i < FLASH_SEQUNCE_SIZE; i++) {
         int time = flashSequence[i];
-        if (i % 2 == 0)
-        {
+        if (i % 2 == 0) {
             waitFor(time);
         }
-        else
-        {
+        else {
             turnLedOn(time);
         }
     }
 }
 
-void turnLedOn(int time)
-{
-    if (time > MAX_LED_ON)
-    {
+void turnLedOn(int time) {
+    if (time > MAX_LED_ON) {
         time = 1;
     }
     digitalWrite(LED_PIN, HIGH);
@@ -128,31 +131,60 @@ void turnLedOn(int time)
     digitalWrite(LED_PIN, LOW);
 }
 
-void readDefaultsFromEeprom()
-{
-    for (byte i = 0; i < FLASH_SEQUNCE_SIZE; i++)
-    {
-        flashSequence {i} = EEPROM.read(i);
+void readDefaultsFromEeprom() {
+    for (byte i = 0; i < FLASH_SEQUNCE_SIZE; i++) {
+        flashSequence[i] = EEPROM.read(i);
+    }
+
+    for (byte i = CONFIG_START_INDEX; i < CONFIG_SIZE + CONFIG_START_INDEX; i++) {
+        configSequence[i] = EEPROM.read(i);
     }
 }
 
-void updateFlashSequence(byte[] newFlashSequnce)
-{
-    for (byte i = 0; i < FLASH_SEQUNCE_SIZE; i++)
-    {
-        if (newFlashSequnce {i} != flashSequence {i})
-        {
-            EEPROM.write(i, flashSequence {i});
+void updateFlashSequenceToEeprom(byte *newFlashSequence) {
+    for (byte i = 0; i < FLASH_SEQUNCE_SIZE; i++) {
+        if (newFlashSequence[i] != flashSequence[i]) {
+            EEPROM.write(i, flashSequence[i]);
         }
+
+        flashSequence[i] = newFlashSequence[i];
     }
-    flashSequence = newFlashSequnce;
 }
 
-void updateTriggering()
-{
+//    Sensor configure
+// 2.byte:
+//     -1bit Analog/digital mode
+//     -1bit Threshold/limit mode
+//     -1bit Below/above limit trigger
+//     -1bit Reserved
+//     -4bit PORT number - use all bits!
+
+// 3-4. bytes 1024 Trigger level (only needs 11bits)
+void updateSensorConfigToEeprom(byte *configs) {
+    for (byte i = CONFIG_START_INDEX; i < CONFIG_SIZE + CONFIG_START_INDEX; i++) {
+        if (configSequence[i] != configs[i]) {
+            EEPROM.write(i, configSequence[i]);
+        }
+        configSequence[i] = configs[i];
+    }
+
+
+    //TODO: Bit masking shifting
+    isAnalog = configSequence[0] & 0x01 == 1;
+    isThresholdMode = configSequence[0] & 0x02 == 1;
+    isTriggerAboveLimit = configSequence[0] & 0x04 == 1;
+    //isReserved = configSequence[0] && 0x08;
+    port = configSequence[0] >> 4;
+
+    int level = bitShiftCombine(configSequence[1], configSequence[2]);
+    triggerLevel = level > MAX_TRIGGER_LEVEL ? MAX_TRIGGER_LEVEL : level;
+}
+
+void updateTriggering() {
     updateTriggerSettingsFromEeprom();
     updateTriggerLevelFromEeprom();
 }
+
 void updateTriggerSettingsFromEeprom() {
     byte settings = EEPROM.read(EEPROM_SETTINGS_OFFSET);
     isAnalog = bitRead(settings, 0);
@@ -160,46 +192,46 @@ void updateTriggerSettingsFromEeprom() {
     isTriggerAboveLimit = bitRead(settings, 2);
     port = settings >> 4;
 }
+
 void updateTriggerLevelFromEeprom() {
     byte high = EEPROM.read(EEPROM_TRIGGER_LEVEL_HIGH);
     byte low = EEPROM.read(EEPROM_TRIGGER_LEVEL_LOW);
     unsigned int combined = bitShiftCombine(high, low);
-    if ( combined > MAX_TRIGGER_LEVEL) {
+    if (combined > MAX_TRIGGER_LEVEL) {
         combined = MAX_TRIGGER_LEVEL;
     }
     triggerLevel = combined;
 }
-void updateSensorConfig()
-{
+
+void updateSensorConfig() {
     //TODO Sensor port & trigger level
+    //Read configs
+    //set IsAnalog/Digital, isThresholdLimitMode, portNumber  
 }
 
-void initSerial()
-{
+void initSerial() {
     Serial.begin(SERIAL_BAUDRATE);
 }
-void readSerial()
-{
-    while (Serial.available() > 0)
-    {
-        byte modeSelection = Serial.read();
-        switch (modeSelection)
-        {
-        case 0xFA:
-            readFlashSequenceFromSerial();
-            break;
-        case 0xFB:
-            readSensorConfigureFromSerial();
-            break;
-        case 0xFC:
-            runSimulatedLedShow();
-            break;
-        case 0xFD:
-            triggerImageTaking();
-            break;
 
-        default:
-            return;
+void readSerial() {
+    while (Serial.available() > 0) {
+        byte modeSelection = Serial.read();
+        switch (modeSelection) {
+            case 'a'://0xFA:
+                readFlashSequenceFromSerial();
+                break;
+            case 0xFB:
+                readSensorConfigureFromSerial();
+                break;
+            case 'b'://0xFC:
+                runSimulatedLedShow();
+                break;
+            case 0xFD:
+                triggerImageTaking();
+                break;
+
+            default:
+                return;
         }
     }
 }
@@ -215,51 +247,43 @@ void readSerial()
 // 5. byte: light on time < 10ms
 // IF 0x00 sent - means end of message
 
-//    Sensor configure
-// 2.byte:
-//     -1bit Analog/digital mode
-//     -1bit Threshold/limit mode
-//     -1bit Below/above limit trigger
-//     -1bit Reserved
-//     -4bit PORT number - use all bits!
 
-// 3-4. bytes 1024 Trigger level (only needs 11bits)
 
 
 
 //SAVE SETTINGS TO EEPROM
-void readFlashSequenceFromSerial()
-{
-    byte[FLASH_SEQUNCE_SIZE] buffer;
-    byte readBytes = Serial.readBytesUntil(0x00, buffer, FLASH_SEQUNCE_SIZE );
+void readFlashSequenceFromSerial() {
+    Serial.write("ReadFlash");
+    byte buffer[FLASH_SEQUNCE_SIZE]; //TODO: Maybe to global variable, maybe leaking
+    byte readBytes = Serial.readBytesUntil(0x00, (char *) buffer, FLASH_SEQUNCE_SIZE);
 
-    if (readBytes > 2)
-    {
-        updateFlashSequence(readBytes);
+    if (readBytes > 2) {
+        updateFlashSequenceToEeprom(&readBytes);
     }
 }
-void readSensorConfigureFromSerial()
-{
-    byte[3] buffer;
-    Serial.readBytes(buffer, 3);
-    if ( !validateBuffer(buffer)) {
+
+
+void readSensorConfigureFromSerial() {
+    byte buffer[3]; //TODO: Maybe to global variable, maybe leaking
+    Serial.readBytes((char *) buffer, 3);
+    if (!validateBuffer(buffer)) {
         return;
     }
-    saveToEEPROM();
+    updateSensorConfigToEeprom(buffer);
 }
 
 //Unused bits should be zero
-boolean validateBuffer(byte[] buffer) {
+boolean validateBuffer(byte *buffer) {
     return bitRead(buffer[0], 1) == 0
            && bitRead(buffer[1], 7) == 0
            && bitRead(buffer[1], 6) == 0
-           && bitRead(buffer[1], 5) == 0
+           && bitRead(buffer[1], 5) == 0;
 }
-void runSimulatedLedShow()
-{
-    blinkSimulation();
+
+void runSimulatedLedShow() {
+    //blinkSimulation();
     simulateLedSequence();
-    blinkSimulation();
+    //blinkSimulation();
 }
 
 void simulateLedSequence() {
@@ -294,9 +318,8 @@ void blinkSimulation() {
 }
 
 
-unsigned int bitShiftCombine( byte high, byte low)
-{
-    unsigned int combined = high;
+byte bitShiftCombine(byte high, byte low) {
+    byte combined = high;
     combined = combined << 8;
     combined |= low;
     return combined;
